@@ -1,0 +1,754 @@
+from typing import Dict, Optional
+
+from PyQt5.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QFormLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QFileDialog,
+    QMessageBox,
+    QLabel,
+    QDoubleSpinBox,
+    QSpinBox,
+    QComboBox,
+    QWidget,
+    QCheckBox,
+    QGridLayout,
+)
+from PyQt5.QtCore import Qt, QBuffer, QIODevice
+try:
+    from PyQt5.QtMultimedia import (
+        QAudioOutput,
+        QAudioFormat,
+        QAudioDeviceInfo,
+        QAudio,
+    )
+    QT_MULTIMEDIA_AVAILABLE = True
+except Exception as e:  # noqa: PIE786 - broad for missing backends
+    print(
+        "WARNING: PyQt5.QtMultimedia could not be imported.\n"
+        "NoiseGeneratorDialog will have audio preview disabled.\n"
+        f"Original error: {e}"
+    )
+    QT_MULTIMEDIA_AVAILABLE = False
+
+import numpy as np
+
+from session_builder.synth_functions.noise_flanger import (
+    generate_swept_notch_pink_sound,
+    generate_swept_notch_pink_sound_transition,
+    _generate_swept_notch_arrays,
+    _generate_swept_notch_arrays_transition,
+)
+
+from session_builder.utils.noise_file import (
+    NoiseParams,
+    save_noise_params,
+    load_noise_params,
+    NOISE_FILE_EXTENSION,
+)
+from session_builder.utils.colored_noise import (
+    DEFAULT_COLOR_PRESETS,
+    load_custom_color_presets,
+    normalized_color_params,
+)
+from .colored_noise_dialog import ColoredNoiseDialog
+from session_builder.presets import NOISE_PRESETS
+
+
+class NoiseGeneratorDialog(QDialog):
+    """Simple GUI for generating swept notch noise."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Noise Generator")
+        self.resize(400, 0)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self._end_widgets: list[QWidget] = []
+        self._transition_only_widgets: list[QWidget] = []
+
+        # Output file
+        file_layout = QHBoxLayout()
+        self.file_edit = QLineEdit("swept_notch_noise.wav")
+        self.file_edit.setToolTip("Where to save the generated audio file")
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self.browse_file)
+        file_layout.addWidget(self.file_edit, 1)
+        file_layout.addWidget(browse_btn)
+        form.addRow("Output File:", file_layout)
+
+        # Duration
+        self.output_duration_spin = QDoubleSpinBox()
+        self.output_duration_spin.setRange(1.0, 100000.0)
+        self.output_duration_spin.setValue(60.0)
+        self.output_duration_spin.setToolTip("Length of the output audio in seconds")
+        form.addRow("Duration (s):", self.output_duration_spin)
+
+        # Sample rate
+        self.sample_rate_spin = QSpinBox()
+        self.sample_rate_spin.setRange(8000, 192000)
+        self.sample_rate_spin.setValue(44100)
+        self.sample_rate_spin.setToolTip("Samples per second of the output file")
+        form.addRow("Sample Rate:", self.sample_rate_spin)
+
+        # Noise type
+        self.noise_type_combo = QComboBox()
+        self.noise_type_combo.setToolTip("Base noise colour to generate")
+        form.addRow("Noise Type:", self.noise_type_combo)
+
+        # Transition enable
+        self.transition_check = QCheckBox("Enable Transition")
+        form.addRow("Transition:", self.transition_check)
+
+        # LFO waveform
+        self.lfo_waveform_combo = QComboBox()
+        self.lfo_waveform_combo.addItems(["Sine", "Triangle"])
+        self.lfo_waveform_combo.setToolTip("Shape of the LFO controlling the sweep")
+        form.addRow("LFO Waveform:", self.lfo_waveform_combo)
+
+        # LFO freq start/end
+        lfo_layout = QHBoxLayout()
+        self.lfo_start_spin = QDoubleSpinBox()
+        self.lfo_start_spin.setRange(0.0, 10.0)
+        self.lfo_start_spin.setDecimals(4)
+        self.lfo_start_spin.setValue(1.0 / 12.0)
+        self.lfo_start_spin.setToolTip("Start LFO frequency")
+        self.lfo_end_spin = QDoubleSpinBox()
+        self.lfo_end_spin.setRange(0.0, 10.0)
+        self.lfo_end_spin.setDecimals(4)
+        self.lfo_end_spin.setValue(1.0 / 12.0)
+        self.lfo_end_spin.setToolTip("End LFO frequency")
+        lfo_layout.addWidget(QLabel("Start:"))
+        lfo_layout.addWidget(self.lfo_start_spin)
+        lfo_end_label = QLabel("End:")
+        lfo_layout.addWidget(lfo_end_label)
+        lfo_layout.addWidget(self.lfo_end_spin)
+        self._end_widgets.extend([lfo_end_label, self.lfo_end_spin])
+        form.addRow("LFO Freq (Hz):", lfo_layout)
+
+        # Number of sweeps
+        self._max_sweeps = 4
+        self.num_sweeps_spin = QSpinBox()
+        self.num_sweeps_spin.setRange(0, self._max_sweeps)
+        self.num_sweeps_spin.setValue(1)
+        self.num_sweeps_spin.setToolTip("How many independent sweeps to apply")
+        self.num_sweeps_spin.valueChanged.connect(self.update_sweep_visibility)
+        form.addRow("Num Sweeps:", self.num_sweeps_spin)
+
+        # Sweep frequency ranges
+        self.sweep_rows = []
+        default_values = [
+            (1000, 10000),
+            (500, 1000),
+            (1850, 3350),
+            (4000, 8000),
+        ]
+        for i in range(self._max_sweeps):
+            row_widget = QWidget()
+            row_layout = QGridLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            default_min, default_max = (
+                default_values[i] if i < len(default_values) else default_values[-1]
+            )
+            s_min = QSpinBox(); s_min.setRange(20, 20000); s_min.setValue(default_min)
+            e_min = QSpinBox(); e_min.setRange(20, 20000); e_min.setValue(default_min)
+            s_max = QSpinBox(); s_max.setRange(20, 22050); s_max.setValue(default_max)
+            e_max = QSpinBox(); e_max.setRange(20, 22050); e_max.setValue(default_max)
+            s_q = QSpinBox(); s_q.setRange(1, 1000); s_q.setValue(25)
+            e_q = QSpinBox(); e_q.setRange(1, 1000); e_q.setValue(25)
+            s_casc = QSpinBox(); s_casc.setRange(1, 20); s_casc.setValue(10)
+            e_casc = QSpinBox(); e_casc.setRange(1, 20); e_casc.setValue(10)
+
+            row_layout.addWidget(QLabel("Start Min:"), 0, 0)
+            row_layout.addWidget(s_min, 0, 1)
+            end_min_label = QLabel("End Min:")
+            row_layout.addWidget(end_min_label, 0, 2)
+            row_layout.addWidget(e_min, 0, 3)
+            row_layout.addWidget(QLabel("Start Max:"), 1, 0)
+            row_layout.addWidget(s_max, 1, 1)
+            end_max_label = QLabel("End Max:")
+            row_layout.addWidget(end_max_label, 1, 2)
+            row_layout.addWidget(e_max, 1, 3)
+            row_layout.addWidget(QLabel("Start Q:"), 2, 0)
+            row_layout.addWidget(s_q, 2, 1)
+            end_q_label = QLabel("End Q:")
+            row_layout.addWidget(end_q_label, 2, 2)
+            row_layout.addWidget(e_q, 2, 3)
+            row_layout.addWidget(QLabel("Start Casc:"), 3, 0)
+            row_layout.addWidget(s_casc, 3, 1)
+            end_casc_label = QLabel("End Casc:")
+            row_layout.addWidget(end_casc_label, 3, 2)
+            row_layout.addWidget(e_casc, 3, 3)
+            self._end_widgets.extend(
+                [end_min_label, e_min, end_max_label, e_max, end_q_label, e_q, end_casc_label, e_casc]
+            )
+
+            form.addRow(f"Sweep {i+1}:", row_widget)
+            self.sweep_rows.append(
+                (row_widget, s_min, e_min, s_max, e_max, s_q, e_q, s_casc, e_casc)
+            )
+
+        self.update_sweep_visibility(self.num_sweeps_spin.value())
+
+
+        # LFO phase offset start/end
+        phase_layout = QHBoxLayout()
+        self.lfo_phase_start_spin = QSpinBox(); self.lfo_phase_start_spin.setRange(0, 360); self.lfo_phase_start_spin.setValue(0)
+        self.lfo_phase_end_spin = QSpinBox(); self.lfo_phase_end_spin.setRange(0, 360); self.lfo_phase_end_spin.setValue(0)
+        phase_layout.addWidget(QLabel("Start:"))
+        phase_layout.addWidget(self.lfo_phase_start_spin)
+        lfo_phase_end_label = QLabel("End:")
+        phase_layout.addWidget(lfo_phase_end_label)
+        phase_layout.addWidget(self.lfo_phase_end_spin)
+        self._end_widgets.extend([lfo_phase_end_label, self.lfo_phase_end_spin])
+        form.addRow("LFO Phase Offset (deg):", phase_layout)
+
+        # Intra-channel offset start/end
+        intra_layout = QHBoxLayout()
+        self.intra_phase_start_spin = QSpinBox(); self.intra_phase_start_spin.setRange(0, 360); self.intra_phase_start_spin.setValue(0)
+        self.intra_phase_end_spin = QSpinBox(); self.intra_phase_end_spin.setRange(0, 360); self.intra_phase_end_spin.setValue(0)
+        intra_layout.addWidget(QLabel("Start:"))
+        intra_layout.addWidget(self.intra_phase_start_spin)
+        intra_phase_end_label = QLabel("End:")
+        intra_layout.addWidget(intra_phase_end_label)
+        intra_layout.addWidget(self.intra_phase_end_spin)
+        self._end_widgets.extend([intra_phase_end_label, self.intra_phase_end_spin])
+        form.addRow("Intra-Phase Offset (deg):", intra_layout)
+
+        # Initial offset and transition duration
+        offset_layout = QHBoxLayout()
+        self.initial_offset_spin = QDoubleSpinBox()
+        self.initial_offset_spin.setRange(0.0, 10000.0)
+        self.initial_offset_spin.setDecimals(3)
+        self.initial_offset_spin.setValue(0.0)
+        self.initial_offset_spin.setToolTip("Time before transition starts")
+        self.transition_duration_spin = QDoubleSpinBox()
+        self.transition_duration_spin.setRange(0.0, 10000.0)
+        self.transition_duration_spin.setDecimals(3)
+        self.transition_duration_spin.setValue(0.0)
+        self.transition_duration_spin.setToolTip("Duration of the transition")
+        initial_offset_label = QLabel("Init:")
+        offset_layout.addWidget(initial_offset_label)
+        offset_layout.addWidget(self.initial_offset_spin)
+        transition_duration_label = QLabel("Duration:")
+        offset_layout.addWidget(transition_duration_label)
+        offset_layout.addWidget(self.transition_duration_spin)
+        self._transition_only_widgets.extend(
+            [initial_offset_label, self.initial_offset_spin, transition_duration_label, self.transition_duration_spin]
+        )
+        form.addRow("Offset & Duration (s):", offset_layout)
+
+        # Optional input file
+        input_layout = QHBoxLayout()
+        self.input_file_edit = QLineEdit()
+        self.input_file_edit.setToolTip("Optional file to process instead of generated noise")
+        input_browse = QPushButton("Browse")
+        input_browse.clicked.connect(self.browse_input_file)
+        input_layout.addWidget(self.input_file_edit, 1)
+        input_layout.addWidget(input_browse)
+        form.addRow("Input Audio (optional):", input_layout)
+
+        layout.addLayout(form)
+
+        button_row = QHBoxLayout()
+        self.load_btn = QPushButton("Load")
+        self.load_btn.clicked.connect(self.load_settings)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setDefault(True)
+        self.save_btn.clicked.connect(self.save_settings)
+        self.colored_btn = QPushButton("Colored Noise...")
+        self.colored_btn.clicked.connect(self.open_colored_noise_dialog)
+        self.generate_btn = QPushButton("Generate")
+        self.generate_btn.clicked.connect(self.on_generate)
+        self.test_btn = QPushButton("Test")
+        self.test_btn.clicked.connect(self.on_test)
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.clicked.connect(self.on_stop)
+        self.stop_btn.setEnabled(False)
+        self.audio_output = None
+        self.audio_buffer = None
+        button_row.addWidget(self.load_btn)
+        button_row.addWidget(self.save_btn)
+        button_row.addWidget(self.colored_btn)
+        button_row.addStretch(1)
+        button_row.addWidget(self.test_btn)
+        button_row.addWidget(self.stop_btn)
+        button_row.addWidget(self.generate_btn)
+        layout.addLayout(button_row)
+
+        if not QT_MULTIMEDIA_AVAILABLE:
+            self.test_btn.setEnabled(False)
+
+        self.transition_check.toggled.connect(self.on_transition_toggled)
+        self.on_transition_toggled(self.transition_check.isChecked())
+
+        self._loaded_color_params: Dict[str, Dict[str, object]] = {}
+        self._loaded_color_names: Dict[str, str] = {}
+        self._refresh_noise_types()
+
+        self.noise_type_combo.currentIndexChanged.connect(self.on_preset_changed)
+
+    def on_preset_changed(self, index: int) -> None:
+        """Handle selection of a noise preset."""
+        preset_name = self.noise_type_combo.currentText()
+        if preset_name in NOISE_PRESETS:
+            preset_data = NOISE_PRESETS[preset_name]
+            
+            # Construct NoiseParams from the dictionary
+            # Note: We need to map the dictionary structure to NoiseParams fields
+            noise_params_dict = preset_data.get('noise_parameters', {})
+            
+            try:
+                # Basic fields
+                params = NoiseParams(
+                   duration_seconds=preset_data.get('duration_seconds', 60.0),
+                   sample_rate=preset_data.get('sample_rate', 44100),
+                   lfo_waveform=preset_data.get('lfo_waveform', 'sine'),
+                   transition=preset_data.get('transition', False),
+                   lfo_freq=preset_data.get('lfo_freq', 1.0/12.0),
+                   start_lfo_freq=preset_data.get('start_lfo_freq', 1.0/12.0),
+                   end_lfo_freq=preset_data.get('end_lfo_freq', 1.0/12.0),
+                   noise_parameters=noise_params_dict,
+                   start_lfo_phase_offset_deg=preset_data.get('start_lfo_phase_offset_deg', 0),
+                   end_lfo_phase_offset_deg=preset_data.get('end_lfo_phase_offset_deg', 0),
+                   start_intra_phase_offset_deg=preset_data.get('start_intra_phase_offset_deg', 0),
+                   end_intra_phase_offset_deg=preset_data.get('end_intra_phase_offset_deg', 0),
+                   initial_offset=preset_data.get('initial_offset', 0.0),
+                   duration=preset_data.get('duration', 0.0),
+                   input_audio_path=preset_data.get('input_audio_path', ""),
+                   sweeps=preset_data.get('sweeps', [])
+                )
+                
+                # Apply to UI
+                self.set_noise_params(params)
+                
+            except Exception as e:
+                print(f"Error loading preset {preset_name}: {e}")
+
+    def load_settings(self) -> None:
+        """Load noise generator settings from a ``.noise`` file."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Noise Settings",
+            "src/presets/noise",
+            f"Noise Files (*{NOISE_FILE_EXTENSION})",
+        )
+        if not path:
+            return
+
+        try:
+            params = load_noise_params(path)
+            self.set_noise_params(params)
+        except Exception as exc:  # noqa: PIE786 - user-facing error dialog
+            QMessageBox.critical(self, "Error", str(exc))
+
+    def save_settings(self) -> None:
+        """Save the current noise generator settings to a ``.noise`` file."""
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Noise Settings",
+            "src/presets/noise/default.noise",
+            f"Noise Files (*{NOISE_FILE_EXTENSION})",
+        )
+        if not path:
+            return
+
+        try:
+            params = self.get_noise_params()
+            save_noise_params(params, path)
+            QMessageBox.information(self, "Saved", f"Settings saved to {path}")
+        except Exception as exc:  # noqa: PIE786 - user-facing error dialog
+            QMessageBox.critical(self, "Error", str(exc))
+
+    def open_colored_noise_dialog(self) -> None:
+        dialog = ColoredNoiseDialog(self)
+        dialog.exec_()
+        self._refresh_noise_types(selected=dialog.color_combo.currentText())
+
+    def _refresh_noise_types(self, *, selected: Optional[str] = None) -> None:
+        current = selected or self.noise_type_combo.currentText()
+        custom_colors = load_custom_color_presets()
+
+        self.noise_type_combo.blockSignals(True)
+        self.noise_type_combo.clear()
+        for name in sorted(DEFAULT_COLOR_PRESETS):
+            self.noise_type_combo.addItem(name)
+        for name in sorted(custom_colors):
+            self.noise_type_combo.addItem(name)
+        for name in sorted(NOISE_PRESETS):
+            if self.noise_type_combo.findText(name, Qt.MatchFixedString) == -1:
+                self.noise_type_combo.addItem(name)
+        for key in sorted(self._loaded_color_params):
+            display = self._loaded_color_names.get(key, key)
+            if self.noise_type_combo.findText(display, Qt.MatchFixedString) == -1:
+                self.noise_type_combo.addItem(display)
+
+        if self.noise_type_combo.count():
+            idx = self.noise_type_combo.findText(current, Qt.MatchFixedString)
+            self.noise_type_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.noise_type_combo.blockSignals(False)
+
+    def _resolve_color_params(self, noise_type: str) -> Dict[str, object]:
+        """Return the full colour parameter set for ``noise_type``.
+
+        Values are pulled from (in order): parameters embedded in a loaded
+        ``.noise`` file, user-defined custom presets, and built-in defaults.
+        The resulting mapping always includes the colour name under ``name``
+        when a match is found.
+        """
+
+        key = (noise_type or "").strip().lower()
+        if not key:
+            return {}
+
+        if key in self._loaded_color_params:
+            stored = dict(self._loaded_color_params[key])
+            return normalized_color_params(stored.get("name", noise_type), stored)
+
+        for name, preset in load_custom_color_presets().items():
+            if name.lower() == key:
+                merged = dict(preset)
+                merged.setdefault("name", name)
+                return normalized_color_params(merged.get("name", noise_type), merged)
+
+        for name, preset in DEFAULT_COLOR_PRESETS.items():
+            if name.lower() == key:
+                merged = dict(preset)
+                merged.setdefault("name", name)
+                return normalized_color_params(merged.get("name", noise_type), merged)
+
+        return normalized_color_params(noise_type, {})
+
+    def _store_color_params(self, noise_type: str, color_params: Dict[str, object]) -> None:
+        """Persist colour params embedded in a ``.noise`` file for reuse."""
+
+        key = (noise_type or "").strip().lower()
+        if not key or not color_params:
+            return
+
+        params = normalized_color_params(noise_type, dict(color_params))
+        params.setdefault("name", noise_type)
+        self._loaded_color_params[key] = params
+        self._loaded_color_names[key] = params.get("name", noise_type)
+
+    def update_sweep_visibility(self, count):
+        for i, (row_widget, *_rest) in enumerate(self.sweep_rows):
+            row_widget.setVisible(i < count)
+
+    def on_transition_toggled(self, enabled: bool) -> None:
+        for widget in self._end_widgets:
+            widget.setVisible(enabled)
+        for widget in self._transition_only_widgets:
+            widget.setVisible(enabled)
+
+    def browse_file(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save Audio", "src/presets/audio", "WAV Files (*.wav)")
+        if path:
+            self.file_edit.setText(path)
+
+    def browse_input_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load Audio", "src/presets/audio", "Audio Files (*.wav *.flac *.mp3)")
+        if path:
+            self.input_file_edit.setText(path)
+
+    def get_noise_params(self) -> NoiseParams:
+        """Collect the current UI values into a :class:`NoiseParams`."""
+        input_path = self._normalized_input_path(self.input_file_edit.text()) or ""
+        color_params = self._resolve_color_params(self.noise_type_combo.currentText())
+        params = NoiseParams(
+            duration_seconds=float(self.output_duration_spin.value()),
+            sample_rate=int(self.sample_rate_spin.value()),
+            lfo_waveform=self.lfo_waveform_combo.currentText().lower(),
+            transition=self.transition_check.isChecked(),
+            lfo_freq=float(self.lfo_start_spin.value()),
+            start_lfo_freq=float(self.lfo_start_spin.value()),
+            end_lfo_freq=float(self.lfo_end_spin.value()),
+            noise_parameters=color_params,
+            start_lfo_phase_offset_deg=int(self.lfo_phase_start_spin.value()),
+            end_lfo_phase_offset_deg=int(self.lfo_phase_end_spin.value()),
+            start_intra_phase_offset_deg=int(self.intra_phase_start_spin.value()),
+            end_intra_phase_offset_deg=int(self.intra_phase_end_spin.value()),
+            initial_offset=float(self.initial_offset_spin.value()),
+            duration=float(self.transition_duration_spin.value()),
+            input_audio_path=input_path,
+        )
+        sweeps = []
+        count = min(self.num_sweeps_spin.value(), len(self.sweep_rows))
+        for i in range(count):
+            (
+                _, s_min, e_min, s_max, e_max, s_q, e_q, s_casc, e_casc
+            ) = self.sweep_rows[i]
+            sweeps.append(
+                {
+                    "start_min": int(s_min.value()),
+                    "end_min": int(e_min.value()),
+                    "start_max": int(s_max.value()),
+                    "end_max": int(e_max.value()),
+                    "start_q": int(s_q.value()),
+                    "end_q": int(e_q.value()),
+                    "start_casc": int(s_casc.value()),
+                    "end_casc": int(e_casc.value()),
+                }
+            )
+        params.sweeps = sweeps
+        return params
+
+    def set_noise_params(self, params: NoiseParams) -> None:
+        """Apply ``params`` to the UI widgets."""
+        color_params = getattr(params, "noise_parameters", {})
+        noise_name = color_params.get("name") or params.noise_type
+        self._store_color_params(noise_name, color_params)
+        display_name = self._loaded_color_names.get(
+            (noise_name or "").strip().lower(), (noise_name or "").title()
+        )
+        self._refresh_noise_types(selected=display_name)
+        self.output_duration_spin.setValue(params.duration_seconds)
+        self.sample_rate_spin.setValue(params.sample_rate)
+        idx = self.noise_type_combo.findText(display_name, Qt.MatchFixedString)
+        if idx != -1:
+            self.noise_type_combo.setCurrentIndex(idx)
+        lfo_waveform = (params.lfo_waveform or "sine").capitalize()
+        idx = self.lfo_waveform_combo.findText(lfo_waveform, Qt.MatchFixedString)
+        if idx != -1:
+            self.lfo_waveform_combo.setCurrentIndex(idx)
+        self.transition_check.setChecked(params.transition)
+        start_freq = params.start_lfo_freq if params.transition else params.lfo_freq
+        self.lfo_start_spin.setValue(start_freq)
+        self.lfo_end_spin.setValue(params.end_lfo_freq)
+        requested_sweeps = max(0, len(params.sweeps))
+        self.num_sweeps_spin.setValue(min(self._max_sweeps, requested_sweeps))
+        for i, (
+            _, s_min, e_min, s_max, e_max, s_q, e_q, s_casc, e_casc
+        ) in enumerate(self.sweep_rows):
+            if i < len(params.sweeps):
+                sweep = params.sweeps[i]
+                s_min.setValue(sweep.get("start_min", s_min.value()))
+                e_min.setValue(sweep.get("end_min", e_min.value()))
+                s_max.setValue(sweep.get("start_max", s_max.value()))
+                e_max.setValue(sweep.get("end_max", e_max.value()))
+                s_q.setValue(sweep.get("start_q", s_q.value()))
+                e_q.setValue(sweep.get("end_q", e_q.value()))
+                s_casc.setValue(sweep.get("start_casc", s_casc.value()))
+                e_casc.setValue(sweep.get("end_casc", e_casc.value()))
+        self.lfo_phase_start_spin.setValue(params.start_lfo_phase_offset_deg)
+        self.lfo_phase_end_spin.setValue(params.end_lfo_phase_offset_deg)
+        self.intra_phase_start_spin.setValue(params.start_intra_phase_offset_deg)
+        self.intra_phase_end_spin.setValue(params.end_intra_phase_offset_deg)
+        self.initial_offset_spin.setValue(params.initial_offset)
+        self.transition_duration_spin.setValue(params.duration)
+        self.input_file_edit.setText(params.input_audio_path or "")
+        self.on_transition_toggled(self.transition_check.isChecked())
+
+    @staticmethod
+    def _scalar_or_list(values: list[int | float]):
+        """Return a scalar when ``values`` has one item, the list when larger, or
+        an empty list when no values are provided.
+
+        The swept-notch generators accept either a scalar or a list matching the
+        number of sweeps. When the user selects zero sweeps we need to pass an
+        empty list rather than indexing into the collection.
+        """
+
+        if not values:
+            return []
+        if len(values) == 1:
+            return values[0]
+        return values
+
+    def on_generate(self):
+        filename = self.file_edit.text()
+        params = self.get_noise_params()
+        input_path = self._normalized_input_path(params.input_audio_path)
+
+        start_sweeps = []
+        end_sweeps = []
+        start_q_vals = []
+        end_q_vals = []
+        start_casc = []
+        end_casc = []
+        for i in range(self.num_sweeps_spin.value()):
+            (
+                _, s_min, e_min, s_max, e_max, s_q, e_q, s_casc, e_casc
+            ) = self.sweep_rows[i]
+            start_sweeps.append((int(s_min.value()), int(s_max.value())))
+            end_sweeps.append((int(e_min.value()), int(e_max.value())))
+            start_q_vals.append(int(s_q.value()))
+            end_q_vals.append(int(e_q.value()))
+            start_casc.append(int(s_casc.value()))
+            end_casc.append(int(e_casc.value()))
+
+        try:
+            start_q = self._scalar_or_list(start_q_vals)
+            end_q = self._scalar_or_list(end_q_vals)
+            start_cascade = self._scalar_or_list(start_casc)
+            end_cascade = self._scalar_or_list(end_casc)
+
+            if self.transition_check.isChecked():
+                generate_swept_notch_pink_sound_transition(
+                    filename=filename,
+                    duration_seconds=float(self.output_duration_spin.value()),
+                    sample_rate=int(self.sample_rate_spin.value()),
+                    start_lfo_freq=float(self.lfo_start_spin.value()),
+                    end_lfo_freq=float(self.lfo_end_spin.value()),
+                    start_filter_sweeps=start_sweeps,
+                    end_filter_sweeps=end_sweeps,
+                    start_notch_q=start_q,
+                    end_notch_q=end_q,
+                    start_cascade_count=start_cascade,
+                    end_cascade_count=end_cascade,
+                    start_lfo_phase_offset_deg=int(self.lfo_phase_start_spin.value()),
+                    end_lfo_phase_offset_deg=int(self.lfo_phase_end_spin.value()),
+                    start_intra_phase_offset_deg=int(self.intra_phase_start_spin.value()),
+                    end_intra_phase_offset_deg=int(self.intra_phase_end_spin.value()),
+                    initial_offset=float(self.initial_offset_spin.value()),
+                    duration=float(self.transition_duration_spin.value()),
+                    input_audio_path=input_path,
+                    noise_type=self.noise_type_combo.currentText().lower(),
+                    lfo_waveform=self.lfo_waveform_combo.currentText().lower(),
+                )
+            else:
+                generate_swept_notch_pink_sound(
+                    filename=filename,
+                    duration_seconds=float(self.output_duration_spin.value()),
+                    sample_rate=int(self.sample_rate_spin.value()),
+                    lfo_freq=float(self.lfo_start_spin.value()),
+                    filter_sweeps=start_sweeps,
+                    notch_q=start_q,
+                    cascade_count=start_cascade,
+                    lfo_phase_offset_deg=int(self.lfo_phase_start_spin.value()),
+                    intra_phase_offset_deg=int(self.intra_phase_start_spin.value()),
+                    input_audio_path=input_path,
+                    noise_type=self.noise_type_combo.currentText().lower(),
+                    lfo_waveform=self.lfo_waveform_combo.currentText().lower(),
+                )
+            QMessageBox.information(self, "Success", f"Generated {filename}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", str(exc))
+
+    @staticmethod
+    def _normalized_input_path(input_path: str | None) -> str | None:
+        """Return ``None`` when the provided path is empty/whitespace."""
+
+        if input_path is None:
+            return None
+
+        normalized = input_path.strip()
+        return normalized or None
+
+    def _generate_noise_array(self, params: NoiseParams):
+        start_sweeps = []
+        end_sweeps = []
+        start_q_vals = []
+        end_q_vals = []
+        start_casc = []
+        end_casc = []
+        for sw in params.sweeps:
+            start_sweeps.append((int(sw.get("start_min", 1000)), int(sw.get("start_max", 10000))))
+            end_sweeps.append((int(sw.get("end_min", 1000)), int(sw.get("end_max", 10000))))
+            start_q_vals.append(int(sw.get("start_q", 25)))
+            end_q_vals.append(int(sw.get("end_q", 25)))
+            start_casc.append(int(sw.get("start_casc", 10)))
+            end_casc.append(int(sw.get("end_casc", 10)))
+
+        if params.transition:
+            audio, _ = _generate_swept_notch_arrays_transition(
+                params.duration_seconds,
+                params.sample_rate,
+                params.start_lfo_freq,
+                params.end_lfo_freq,
+                start_sweeps,
+                end_sweeps,
+                self._scalar_or_list(start_q_vals),
+                self._scalar_or_list(end_q_vals),
+                self._scalar_or_list(start_casc),
+                self._scalar_or_list(end_casc),
+                params.start_lfo_phase_offset_deg,
+                params.end_lfo_phase_offset_deg,
+                params.start_intra_phase_offset_deg,
+                params.end_intra_phase_offset_deg,
+                params.input_audio_path or None,
+                params.noise_parameters,
+                params.lfo_waveform,
+                params.initial_offset,
+                params.duration,
+                "linear",
+                False,
+                2,
+            )
+        else:
+            audio, _ = _generate_swept_notch_arrays(
+                params.duration_seconds,
+                params.sample_rate,
+                params.lfo_freq,
+                start_sweeps,
+                self._scalar_or_list(start_q_vals),
+                self._scalar_or_list(start_casc),
+                params.start_lfo_phase_offset_deg,
+                params.start_intra_phase_offset_deg,
+                params.input_audio_path or None,
+                params.noise_parameters,
+                params.lfo_waveform,
+                False,
+                2,
+            )
+        return audio
+
+    def on_test(self):
+        if not QT_MULTIMEDIA_AVAILABLE:
+            QMessageBox.critical(
+                self,
+                "PyQt5 Multimedia Missing",
+                "PyQt5.QtMultimedia is required for audio preview, but it "
+                "could not be loaded."
+            )
+            return
+        params = self.get_noise_params()
+        params.duration_seconds = 30.0
+        try:
+            stereo = self._generate_noise_array(params)
+            audio_int16 = (np.clip(stereo, -1.0, 1.0) * 32767).astype(np.int16)
+            audio_bytes = audio_int16.tobytes()
+
+            fmt = QAudioFormat()
+            fmt.setCodec("audio/pcm")
+            fmt.setSampleRate(int(params.sample_rate))
+            fmt.setSampleSize(16)
+            fmt.setChannelCount(2)
+            fmt.setByteOrder(QAudioFormat.LittleEndian)
+            fmt.setSampleType(QAudioFormat.SignedInt)
+
+            device_info = QAudioDeviceInfo.defaultOutputDevice()
+            if not device_info.isFormatSupported(fmt):
+                QMessageBox.warning(self, "Noise Test", "Default output device does not support the required format")
+                return
+
+            if self.audio_output:
+                self.on_stop()
+
+            self.audio_output = QAudioOutput(fmt, self)
+            self.audio_output.stateChanged.connect(self.on_audio_state_changed)
+            self.audio_buffer = QBuffer()
+            self.audio_buffer.setData(audio_bytes)
+            self.audio_buffer.open(QIODevice.ReadOnly)
+            self.audio_output.start(self.audio_buffer)
+            self.stop_btn.setEnabled(True)
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", str(exc))
+
+    def on_stop(self):
+        if self.audio_output:
+            self.audio_output.stop()
+            self.audio_output = None
+        if self.audio_buffer:
+            self.audio_buffer.close()
+            self.audio_buffer = None
+        self.stop_btn.setEnabled(False)
+
+    def on_audio_state_changed(self, state):
+        if state in (QAudio.IdleState, QAudio.StoppedState):
+            self.on_stop()

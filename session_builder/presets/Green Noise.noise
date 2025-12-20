@@ -1,0 +1,32 @@
+{
+  "duration_seconds": 60.0,
+  "sample_rate": 44100,
+  "lfo_waveform": "sine",
+  "transition": false,
+  "lfo_freq": 0.0833,
+  "start_lfo_freq": 0.0833,
+  "end_lfo_freq": 0.0833,
+  "sweeps": [],
+  "noise_parameters": {
+    "exponent": 0.8,
+    "high_exponent": 1.75,
+    "distribution_curve": 1.0,
+    "lowcut": 50.0,
+    "highcut": 800.0,
+    "amplitude": 0.5,
+    "seed": 1,
+    "name": "Green 2"
+  },
+  "start_lfo_phase_offset_deg": 0,
+  "end_lfo_phase_offset_deg": 0,
+  "start_intra_phase_offset_deg": 0,
+  "end_intra_phase_offset_deg": 0,
+  "initial_offset": 0.0,
+  "duration": 0.0,
+  "input_audio_path": "",
+  "start_time": 0.0,
+  "fade_in": 0.0,
+  "fade_out": 0.0,
+  "amp_envelope": [],
+  "static_notches": []
+}

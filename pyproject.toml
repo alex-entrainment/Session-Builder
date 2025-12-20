@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "session-builder"
+version = "0.1.0"
+authors = [{name = "User", email = "user@example.com"}]
+description = "Binaural Session Builder Standalone"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.20",
+    "scipy",
+    "PyQt5",
+    "pandas",
+    "plotly>=5.20",
+    "slab>=1.8.0",
+    "soundfile",
+    "matplotlib",
+    "numba"
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "realtime_backend"
+manifest-path = "session_builder/realtime_backend/Cargo.toml"
+python-source = "."

@@ -1,0 +1,7 @@
+{
+    "step_duration": 30.0,
+    "normalization_level": 0.3,
+    "crossfade_duration": 3.0,
+    "default_binaural_id": "builtin:F10-B",
+    "default_noise_id": "noise_preset:Brown Noise 1"
+}
