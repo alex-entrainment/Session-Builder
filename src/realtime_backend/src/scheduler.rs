@@ -967,14 +967,14 @@ impl TrackScheduler {
         Self::apply_gain_stage(
             binaural_buf,
             norm_target,
-            step.binaural_volume,
+            step.binaural_volume * crate::models::BINAURAL_MIX_SCALING,
             binaural_count > 0,
             binaural_peak,
         );
         Self::apply_gain_stage(
             noise_buf,
             norm_target,
-            step.noise_volume,
+            step.noise_volume * crate::models::NOISE_MIX_SCALING,
             noise_count > 0,
             noise_peak,
         );
@@ -1262,7 +1262,7 @@ impl TrackScheduler {
 mod tests {
     use super::{
         BackgroundNoiseData, CrossfadeCurve, GlobalSettings, StepData, TrackData,
-        MAX_INDIVIDUAL_GAIN,
+        BINAURAL_MIX_SCALING, MAX_INDIVIDUAL_GAIN, NOISE_MIX_SCALING,
     };
     use crate::noise_params::NoiseParams;
 

@@ -24,8 +24,8 @@ except Exception:  # pragma: no cover - allow operation without slab
 
 
 # Maximum individual gain for binaural/noise to prevent clipping when combined.
-# With both at max (0.48 + 0.48 = 0.96), the combined output stays under 1.0.
-MAX_INDIVIDUAL_GAIN = 0.48
+# With both at max (0.36 + 0.60 = 0.96), the combined output stays under 1.0.
+MAX_INDIVIDUAL_GAIN = 0.60
 
 
 class _FallbackBrainwaveState(Enum):

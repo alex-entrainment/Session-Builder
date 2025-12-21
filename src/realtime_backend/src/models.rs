@@ -18,8 +18,17 @@ fn default_crossfade_curve() -> String {
 }
 
 /// Maximum individual gain for binaural/noise to prevent clipping when combined.
-/// With both at max (0.48 + 0.48 = 0.96), the combined output stays under 1.0.
-pub const MAX_INDIVIDUAL_GAIN: f32 = 0.48;
+/// With both at max (0.36 [binaural] + 0.60 [noise] = 0.96), the combined output stays under 1.0.
+/// Increased from 0.48 to 0.60 to allow for noise boost.
+pub const MAX_INDIVIDUAL_GAIN: f32 = 0.60;
+
+/// Scaling factor applied to binaural beats during mixing to equalize perceptual loudness relative to noise.
+/// This matches the user's request for an "invisible" 25% reduction.
+pub const BINAURAL_MIX_SCALING: f32 = 0.25;
+
+/// Scaling factor applied to noise during mixing to equalize perceptual loudness.
+/// This matches the user's request for an "invisible" 25% boost.
+pub const NOISE_MIX_SCALING: f32 = 1.25;
 
 fn default_binaural_volume() -> f32 {
     MAX_INDIVIDUAL_GAIN
