@@ -23,6 +23,29 @@ Run the launcher script from your terminal (or double-click if your file manager
 ./"Session Builder Launcher.sh"
 ```
 
+## Features 
+
+### Stream or Generate your own custom binaural sessions 
+- Select from a range of Focus Level binaural presets
+- Select from a range of background "Noise" profiles
+- Load other audio files to play in the background
+- Save sessions for loading later, or export the session to an audio file!
+- 
+
+---
+
+## ⚡ One-Line Installation
+
+**Windows (PowerShell)**
+```powershell
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "Installing Git..."; winget install --id Git.Git -e --source winget }; git clone https://github.com/alex-entrainment/Session-Builder.git; cd Session-Builder; .\scripts\setup-run.ps1
+```
+
+**Linux / macOS**
+```bash
+(command -v git >/dev/null || (echo "Installing Git..." && (command -v brew >/dev/null && brew install git) || (command -v apt >/dev/null && sudo apt update && sudo apt install git -y) || (command -v pacman >/dev/null && sudo pacman -S git --noconfirm) || (command -v dnf >/dev/null && sudo dnf install git -y))) && git clone https://github.com/alex-entrainment/Session-Builder.git && cd Session-Builder && chmod +x scripts/setup-run.sh && ./scripts/setup-run.sh
+```
+
 ---
 
 ## 💻 Manual Terminal Usage
@@ -42,19 +65,6 @@ chmod +x scripts/setup-run.sh
 
 ---
 
-## ⚡ One-Line Installation
-
-**Windows (PowerShell)**
-```powershell
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "Installing Git..."; winget install --id Git.Git -e --source winget }; git clone https://github.com/alex-entrainment/Session-Builder.git; cd Session-Builder; .\scripts\setup-run.ps1
-```
-
-**Linux / macOS**
-```bash
-(command -v git >/dev/null || (echo "Installing Git..." && (command -v brew >/dev/null && brew install git) || (command -v apt >/dev/null && sudo apt update && sudo apt install git -y) || (command -v pacman >/dev/null && sudo pacman -S git --noconfirm) || (command -v dnf >/dev/null && sudo dnf install git -y))) && git clone https://github.com/alex-entrainment/Session-Builder.git && cd Session-Builder && chmod +x scripts/setup-run.sh && ./scripts/setup-run.sh
-```
-
----
 
 ## 🔧 Prerequisites
 
