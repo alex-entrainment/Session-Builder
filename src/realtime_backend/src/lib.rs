@@ -11,6 +11,7 @@ pub mod models;
 pub mod noise_params;
 pub mod scheduler;
 pub mod streaming_noise;
+pub mod voice_loader;
 pub mod voices;
 
 use config::CONFIG;
@@ -62,8 +63,17 @@ fn start_stream(track_json_str: String, start_time: Option<f64>) -> PyResult<()>
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
     let stream_rate = cfg.sample_rate().0;
 
+    // Spawn the background voice loader
+    let (loader_tx, loader_rx) = voice_loader::spawn_voice_loader();
+
     let start_secs = start_time.unwrap_or(0.0);
-    let mut scheduler = TrackScheduler::new_with_start(track_data, stream_rate, start_secs);
+    let mut scheduler = TrackScheduler::new_with_start(
+        track_data,
+        stream_rate,
+        start_secs,
+        Some(loader_tx),
+        Some(loader_rx),
+    );
     // Disable GPU usage for realtime playback. GPU acceleration is reserved
     // for offline rendering to avoid unnecessary overhead during streaming.
     scheduler.gpu_enabled = false;
@@ -288,7 +298,7 @@ fn render_full_wav(track_json_str: String, out_path: String) -> PyResult<()> {
 #[wasm_bindgen]
 pub fn start_stream(track_json_str: &str, sample_rate: u32, start_time: f64) {
     let track_data: TrackData = serde_json::from_str(track_json_str).unwrap();
-    let scheduler = TrackScheduler::new_with_start(track_data, sample_rate, start_time);
+    let scheduler = TrackScheduler::new_with_start(track_data, sample_rate, start_time, None, None);
     let rb = HeapRb::<Command>::new(1024);
     let (prod, cons) = rb.split();
     *ENGINE_STATE.lock() = Some(prod);

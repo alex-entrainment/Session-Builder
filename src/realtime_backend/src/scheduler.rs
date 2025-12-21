@@ -4,6 +4,9 @@ use crate::models::{BackgroundNoiseData, StepData, TrackData, MAX_INDIVIDUAL_GAI
 use crate::noise_params::NoiseParams;
 use crate::streaming_noise::StreamingNoise;
 use crate::voices::{voices_for_step, VoiceKind};
+use crate::voice_loader::{LoadRequest, LoadResponse};
+use crossbeam::channel::{Receiver, Sender};
+use std::collections::HashMap;
 use std::fs::File;
 
 use symphonia::core::audio::SampleBuffer;
@@ -103,6 +106,12 @@ pub struct TrackScheduler {
     /// Accumulated phases (phase_l, phase_r) carried over from previous voices.
     /// Used to maintain phase continuity and prevent clicking when transitioning between steps.
     accumulated_phases: Vec<(f32, f32)>,
+
+    // Async voice loading
+    loader_tx: Option<Sender<LoadRequest>>,
+    loader_rx: Option<Receiver<LoadResponse>>,
+    cached_next_voices: HashMap<usize, Vec<StepVoice>>,
+    pending_requests: Vec<usize>,
 }
 
 pub enum ClipSamples {
@@ -571,10 +580,16 @@ fn resample_linear_stereo(input: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f3
 
 impl TrackScheduler {
     pub fn new(track: TrackData, device_rate: u32) -> Self {
-        Self::new_with_start(track, device_rate, 0.0)
+        Self::new_with_start(track, device_rate, 0.0, None, None)
     }
 
-    pub fn new_with_start(track: TrackData, device_rate: u32, start_time: f64) -> Self {
+    pub fn new_with_start(
+        track: TrackData,
+        device_rate: u32,
+        start_time: f64,
+        loader_tx: Option<Sender<LoadRequest>>,
+        loader_rx: Option<Receiver<LoadResponse>>,
+    ) -> Self {
         let sample_rate = device_rate as f32;
         let crossfade_samples =
             (track.global_settings.crossfade_duration * sample_rate as f64) as usize;
@@ -663,6 +678,10 @@ impl TrackScheduler {
             voice_temp: Vec::new(),
             noise_scratch: Vec::new(),
             accumulated_phases: Vec::new(),
+            loader_tx,
+            loader_rx,
+            cached_next_voices: HashMap::new(),
+            pending_requests: Vec::new(),
         };
 
         let start_samples = (start_time * sample_rate as f64) as usize;
@@ -1038,9 +1057,45 @@ impl TrackScheduler {
             return;
         }
 
+        // POLL FOR COMPLETED VOICE LOADS
+        if let Some(rx) = &self.loader_rx {
+            while let Ok(response) = rx.try_recv() {
+                self.cached_next_voices.insert(response.step_index, response.voices);
+                self.pending_requests.retain(|&x| x != response.step_index);
+            }
+        }
+
+        // TRIGGER PRELOAD FOR NEXT STEP (if not already cached or pending)
+        if let Some(tx) = &self.loader_tx {
+            let next_step_idx = self.current_step + 1;
+            if next_step_idx < self.track.steps.len() {
+                let already_cached = self.cached_next_voices.contains_key(&next_step_idx);
+                let already_pending = self.pending_requests.contains(&next_step_idx);
+                
+                if !already_cached && !already_pending {
+                    // Send request
+                     let req = LoadRequest {
+                        step_index: next_step_idx,
+                        step_data: self.track.steps[next_step_idx].clone(),
+                        sample_rate: self.sample_rate,
+                        track_data: self.track.clone(),
+                    };
+                    if tx.send(req).is_ok() {
+                        self.pending_requests.push(next_step_idx);
+                    }
+                }
+            }
+        }
+
         if self.active_voices.is_empty() && !self.crossfade_active {
             let step = &self.track.steps[self.current_step];
-            let mut new_voices = voices_for_step(step, self.sample_rate);
+            // Try to get cached voices first, otherwise load synchronously
+            let mut new_voices = if let Some(voices) = self.cached_next_voices.remove(&self.current_step) {
+                voices
+            } else {
+                voices_for_step(step, self.sample_rate)
+            };
+            
             // Apply accumulated phases from previous voices to maintain phase continuity
             Self::apply_phases_to_voices(&self.accumulated_phases, &mut new_voices);
             self.active_voices = new_voices;
@@ -1059,7 +1114,16 @@ impl TrackScheduler {
                 if self.current_sample >= step_samples.saturating_sub(fade_len) {
                     // Extract phases from current voices before transitioning
                     self.accumulated_phases = Self::extract_phases_from_voices(&self.active_voices);
-                    let mut new_next_voices = voices_for_step(next_step, self.sample_rate);
+                    
+                    // TRY TO USE PRELOADED VOICES
+                    let next_step_idx = self.current_step + 1;
+                    let mut new_next_voices = if let Some(voices) = self.cached_next_voices.remove(&next_step_idx) {
+                        voices
+                    } else {
+                        // FALLBACK: Synchronous load (might block/glitch, but better than crashing)
+                        voices_for_step(next_step, self.sample_rate)
+                    };
+
                     // Apply accumulated phases to the new voices for continuity
                     Self::apply_phases_to_voices(&self.accumulated_phases, &mut new_next_voices);
                     self.next_voices = new_next_voices;
