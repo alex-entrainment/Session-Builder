@@ -2,50 +2,69 @@
 
 A standalone version of the Binaural Session Builder, featuring a high-performance Rust audio backend for real-time binaural beat and noise generation.
 
-## Prerequisites
-
-- **Internet Connection**: Required for the first run to download dependencies.
-- **Administrator/Sudo Access**: May be required to install system dependencies (Python/Rust).
-
-## How to Run
+## 🚀 Quick Start (Recommended)
 
 ### Windows
+Double-click **`Session Builder Launcher.bat`**. 
+This will automatically:
+1.  Check for and install Python & Rust (via Winget) if missing.
+2.  Set up the environment and dependencies.
+3.  Build the audio engine.
+4.  Launch the application.
 
-1.  Open PowerShell in this directory.
-2.  Run:
-    ```powershell
-    .\setup.ps1
-    ```
-    This script handles everything:
-    - Checks for & installs Python/Rust (via winget).
-    - Checks for & installs Python dependencies.
-    - Builds the high-performance audio engine.
-    - Launches the application.
+*Note: You may be asked to approve administrative privileges for installing dependencies.*
 
 ### Linux / macOS
+Run the launcher script from your terminal (or double-click if your file manager supports it):
+```bash
+./"Session Builder Launcher.sh"
+```
 
-1.  Open a terminal in this directory.
-2.  Run:
-    ```bash
-    chmod +x setup.sh
-    ./setup.sh
-    ```
-    This script handles everything:
-    - Installs Python/Rust via your package manager (`apt`, `brew`, `pacman`) if missing.
-    - Sets up the environment.
-    - Builds the audio engine.
-    - Launches the application.
+---
 
-## Troubleshooting
+## 💻 Manual Terminal Usage
 
-- **Audio Backend Build Failed**: Ensure you have a C compiler installed (e.g., `build-essential` on Linux, Xcode on Mac, VS Build Tools on Windows). The setup script attempts to handle this, but specific system configurations may vary.
-- **Python Not Found**: If the automatic install fails, please install Python 3.9+ manually.
+If you prefer using the command line or need to debug, you can run the setup scripts directly from the `scripts/` folder.
 
-## Development
+**Windows (PowerShell):**
+```powershell
+.\scripts\setup-run.ps1
+```
 
-This repository is configured for packaging with `maturin`.
+**Linux / macOS (Bash):**
+```bash
+chmod +x scripts/setup-run.sh
+./scripts/setup-run.sh
+```
 
-### Structrue
-- `session_builder/`: Main Python package source.
-- `binauralbuilder_core/`: Dependencies.
-- `setup.ps1` / `setup.sh`: Unified setup and launch scripts.
+---
+
+## ⚡ One-Line Installation
+
+**Windows (PowerShell)**
+```powershell
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "Installing Git..."; winget install --id Git.Git -e --source winget }; git clone https://github.com/alex-entrainment/Session-Builder.git; cd Session-Builder; .\scripts\setup-run.ps1
+```
+
+**Linux / macOS**
+```bash
+(command -v git >/dev/null || (echo "Installing Git..." && (command -v brew >/dev/null && brew install git) || (command -v apt >/dev/null && sudo apt update && sudo apt install git -y) || (command -v pacman >/dev/null && sudo pacman -S git --noconfirm) || (command -v dnf >/dev/null && sudo dnf install git -y))) && git clone https://github.com/alex-entrainment/Session-Builder.git && cd Session-Builder && chmod +x scripts/setup-run.sh && ./scripts/setup-run.sh
+```
+
+---
+
+## 🔧 Prerequisites
+
+*   **Internet Connection**: Required for the first run to download Python packages and Rust crates.
+*   **Git**: Required to clone the repository (and for the Web Installer).
+*   **System Dependencies**:
+    *   **Windows**: The launcher attempts to install Python 3 and Rust via `winget`.
+    *   **Linux**: Requires `python3`, `python3-pip`, `python3-venv`, and `build-essential`. The script attempts to install these via `apt`/`dnf`/`pacman`.
+    *   **macOS**: Requires Homebrew installed. The script uses `brew` to install Python and Rust.
+
+## 🛠️ Development Structure
+
+*   `src/`: Main application source code.
+*   `binauralbuilder_core/`: Core audio logic and synthesis functions.
+*   `scripts/`: Setup and maintenance scripts.
+*   `config/` (Created on first run): User preferences and presets.

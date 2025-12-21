@@ -161,7 +161,6 @@ def normalized_color_params(noise_type: str, params: Dict[str, Any]) -> Dict[str
 def _color_preset(name: str, **params) -> Dict[str, object]:
     return {"name": name, "params": params}
 
-
 DEFAULT_COLOR_PRESETS = {
     preset["name"]: normalized_color_params(preset["name"], preset["params"])
     for preset in (

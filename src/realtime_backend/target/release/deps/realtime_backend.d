@@ -1,6 +1,6 @@
-C:\Users\alexb\Downloads\session_builder_standalone\session_builder\realtime_backend\target\release\deps\realtime_backend.d: src\lib.rs src\audio_io.rs src\command.rs src\config.rs src\dsp\mod.rs src\dsp\noise_flanger.rs src\dsp\trig.rs src\gpu.rs src\models.rs src\noise_params.rs src\scheduler.rs src\streaming_noise.rs src\voices.rs
+C:\Users\alexb\Downloads\session_builder_standalone\src\realtime_backend\target\release\deps\realtime_backend.d: src\lib.rs src\audio_io.rs src\command.rs src\config.rs src\dsp\mod.rs src\dsp\noise_flanger.rs src\dsp\trig.rs src\gpu.rs src\models.rs src\noise_params.rs src\scheduler.rs src\streaming_noise.rs src\voices.rs
 
-C:\Users\alexb\Downloads\session_builder_standalone\session_builder\realtime_backend\target\release\deps\realtime_backend.dll: src\lib.rs src\audio_io.rs src\command.rs src\config.rs src\dsp\mod.rs src\dsp\noise_flanger.rs src\dsp\trig.rs src\gpu.rs src\models.rs src\noise_params.rs src\scheduler.rs src\streaming_noise.rs src\voices.rs
+C:\Users\alexb\Downloads\session_builder_standalone\src\realtime_backend\target\release\deps\realtime_backend.dll: src\lib.rs src\audio_io.rs src\command.rs src\config.rs src\dsp\mod.rs src\dsp\noise_flanger.rs src\dsp\trig.rs src\gpu.rs src\models.rs src\noise_params.rs src\scheduler.rs src\streaming_noise.rs src\voices.rs
 
 src\lib.rs:
 src\audio_io.rs:
@@ -16,4 +16,4 @@ src\scheduler.rs:
 src\streaming_noise.rs:
 src\voices.rs:
 
-# env-dep:CARGO_MANIFEST_DIR=C:\\Users\\alexb\\Downloads\\session_builder_standalone\\session_builder\\realtime_backend
+# env-dep:CARGO_MANIFEST_DIR=C:\\Users\\alexb\\Downloads\\session_builder_standalone\\src\\realtime_backend

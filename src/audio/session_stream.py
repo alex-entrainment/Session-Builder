@@ -165,11 +165,11 @@ except Exception:  # pragma: no cover - allow headless operation
     QCoreApplication = None # type: ignore
 
 
-from src.synth_functions.sound_creator import (
+from binauralbuilder_core.synth_functions.sound_creator import (
     crossfade_signals,
     generate_single_step_audio_segment,
 )
-from src.synth_functions.noise_flanger import (
+from binauralbuilder_core.synth_functions.noise_flanger import (
     _generate_swept_notch_arrays,
     _generate_swept_notch_arrays_transition,
 )

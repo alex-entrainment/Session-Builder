@@ -13,7 +13,7 @@ from src.utils.noise_file import load_noise_params
 # Mock audio_engine to avoid numpy dependency
 import sys
 from unittest.mock import MagicMock
-sys.modules["src.synth_functions.audio_engine"] = MagicMock()
+sys.modules["binauralbuilder_core.synth_functions.audio_engine"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
 sys.modules["scipy"] = MagicMock()
 sys.modules["scipy.signal"] = MagicMock()
