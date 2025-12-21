@@ -2,6 +2,9 @@
 
 A standalone version of the Binaural Session Builder, featuring a high-performance Rust audio backend for real-time binaural beat and noise generation.
 
+<img width="1380" height="890" alt="image" src="https://github.com/user-attachments/assets/7fbaa3f7-add8-4582-b0d2-69c93ee9e738" />
+
+
 ## 🚀 Quick Start (Recommended)
 
 ### Windows
