@@ -1,4 +1,4 @@
-# Session Builder Standalone
+# Session Builder
 
 A standalone version of the Binaural Session Builder, featuring a high-performance Rust audio backend for real-time binaural beat and noise generation.
 
