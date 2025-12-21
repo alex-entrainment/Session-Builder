@@ -5,9 +5,18 @@ build-backend = "maturin"
 [project]
 name = "session-builder"
 version = "0.1.0"
-authors = [{name = "User", email = "user@example.com"}]
-description = "Binaural Session Builder Standalone"
+authors = [{name = "Alex B", email = "alex@example.com"}]
+description = "Binaural Session Builder Standalone - A tool for creating binaural beat sessions."
+readme = "README.md"
 requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
+]
 dependencies = [
     "numpy>=1.20",
     "scipy",
@@ -23,5 +32,6 @@ dependencies = [
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "realtime_backend"
-manifest-path = "session_builder/realtime_backend/Cargo.toml"
+manifest-path = "src/realtime_backend/Cargo.toml"
 python-source = "."
+include = ["binauralbuilder_core/**/*"]

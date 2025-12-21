@@ -1,4 +1,4 @@
-recursive-include session_builder/presets *.json *.noise
+recursive-include src/presets *.json *.noise
 include requirements.txt
 global-exclude *.pyc
 global-exclude __pycache__

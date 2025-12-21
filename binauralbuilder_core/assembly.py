@@ -127,4 +127,3 @@ class SessionAssembler:
 
 
 __all__ = ["SessionAssembler"]
-

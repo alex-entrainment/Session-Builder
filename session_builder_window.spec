@@ -32,7 +32,10 @@ a = Analysis(
     ["src/audio/session_builder_launcher.py"],
     pathex=["src"],
     binaries=binaries,
-    datas=datas,
+    datas=[
+        ('src/presets', 'src/presets'),
+        ('audio_config.ini', '.'),
+    ],
     hiddenimports=hiddenimports,
 )
 

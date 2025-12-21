@@ -326,9 +326,9 @@ def build_binaural_preset_catalog(
         except Exception:
             continue
 
-    # Load from session_builder.presets (generated file)
+    # Load from src.presets (generated file)
     try:
-        from session_builder.presets import BINAURAL_PRESETS
+        from src.presets import BINAURAL_PRESETS
         for name, data in BINAURAL_PRESETS.items():
             try:
                 progression = data.get("progression", [])
@@ -366,29 +366,28 @@ def build_noise_preset_catalog(
 
     catalog: Dict[str, SessionPresetChoice] = {}
     preset_dirs = preset_dirs or []
-    # Load .noise files from disk (Disabled per user request to favor built-in presets)
-    # noise_files = _collect_files(preset_dirs, ".noise")
-    # for path in noise_files:
-    #     try:
-    #         params = load_noise_params(str(path))
-    #     except Exception:
-    #         continue
-    #     preset_id = f"noise:{path.stem}"
-    #     catalog[preset_id] = SessionPresetChoice(
-    #         id=preset_id,
-    #         label=path.stem.replace("_", " ").title(),
-    #         kind="noise",
-    #         description="Noise preset loaded from file.",
-    #         source_path=path,
-    #         payload={
-    #             "params": asdict(params),
-    #             "params_path": str(path),
-    #         },
-    #     )
+    noise_files = _collect_files(preset_dirs, ".noise")
+    for path in noise_files:
+        try:
+            params = load_noise_params(str(path))
+        except Exception:
+            continue
+        preset_id = f"noise:{path.stem}"
+        catalog[preset_id] = SessionPresetChoice(
+            id=preset_id,
+            label=path.stem.replace("_", " ").title(),
+            kind="noise",
+            description="Noise preset loaded from file.",
+            source_path=path,
+            payload={
+                "params": asdict(params),
+                "params_path": str(path),
+            },
+        )
 
-    # Load from session_builder.presets (generated file)
+    # Load from src.presets (generated file)
     try:
-        from session_builder.presets import NOISE_PRESETS
+        from src.presets import NOISE_PRESETS
         for name, data in NOISE_PRESETS.items():
             try:
                 # Noise presets in presets.py are just the params dict

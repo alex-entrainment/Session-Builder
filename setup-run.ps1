@@ -70,26 +70,20 @@ if (Test-Path "setup_audio.py") {
 
 Write-Host "Building Audio Backend (this may take a moment)..."
 # Navigate to backend source
-Push-Location "session_builder/realtime_backend"
-    try {
-        # We must use maturin from the venv
-        # The path to maturin.exe in venv Scripts
-        $MaturinExe = "..\..\$VenvDir\Scripts\maturin.exe"
-        if (-not (Test-Path $MaturinExe)) {
-             # Fallback if installed globally or path issue, but preference is venv
-             $MaturinExe = "maturin" 
-        }
-        
-        & $MaturinExe develop --release
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to build audio backend."
-        }
-    } finally {
-        Pop-Location
+    # Build from root using pyproject.toml configuration
+    $MaturinExe = ".\$VenvDir\Scripts\maturin.exe"
+    if (-not (Test-Path $MaturinExe)) {
+         # Fallback if installed globally or path issue, but preference is venv
+         $MaturinExe = "maturin" 
+    }
+    
+    & $MaturinExe develop --release
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to build audio backend."
     }
 
 # --- 4. Run Application ---
 
 Write-Host "Starting Session Builder..."
 $Env:PYTHONPATH = "$PSScriptRoot"
-& $PythonExe -m session_builder.audio.session_builder_launcher --binaural-preset-dir session_builder/presets --noise-preset-dir session_builder/presets @args
+& $PythonExe -m src.audio.session_builder_launcher --binaural-preset-dir src/presets --noise-preset-dir src/presets @args

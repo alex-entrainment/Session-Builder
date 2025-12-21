@@ -94,12 +94,10 @@ fi
 # --- 4. Build Backend ---
 
 echo "Building Audio Backend..."
-cd "session_builder/realtime_backend"
 maturin develop --release
-cd "$SCRIPT_DIR"
 
 # --- 5. Run Application ---
 
 echo "Starting Session Builder..."
 export PYTHONPATH="$SCRIPT_DIR"
-python3 -m session_builder.audio.session_builder_launcher --binaural-preset-dir session_builder/presets --noise-preset-dir session_builder/presets "$@"
+python3 -m src.audio.session_builder_launcher --binaural-preset-dir src/presets --noise-preset-dir src/presets "$@"
