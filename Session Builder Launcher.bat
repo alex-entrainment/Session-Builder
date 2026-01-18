@@ -10,7 +10,7 @@ if not exist "%PY%" (
   exit /b 1
 )
 
-"%PY%" -m src.audio.session_builder_launcher --binaural-preset-dir src/presets --noise-preset-dir src/presets @args
+"%PY%" -m src.audio.session_builder_launcher --binaural-preset-dir src/presets --noise-preset-dir src/presets 
 
 if errorlevel 1 (
   echo.
